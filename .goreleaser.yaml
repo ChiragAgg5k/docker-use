@@ -52,7 +52,7 @@ brews:
       owner: chiragagg5k
       name: homebrew-tools
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    folder: Formula
+    directory: Formula
     homepage: "https://github.com/chiragagg5k/docker-use"
     description: "CLI to manage multiple Docker Hub accounts"
     license: "MIT"
