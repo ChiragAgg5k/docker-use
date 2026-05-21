@@ -13,8 +13,7 @@ var (
 )
 
 func main() {
-	cli.Version = version
-	if err := cli.NewRootCommand().Execute(); err != nil {
+	if err := cli.NewRootCommand(version).Execute(); err != nil {
 		os.Exit(1)
 	}
 }

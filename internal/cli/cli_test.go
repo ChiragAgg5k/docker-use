@@ -107,8 +107,11 @@ func TestHiddenSwitchPersistsCurrentAccount(t *testing.T) {
 
 func TestUseCommandIsRemoved(t *testing.T) {
 	_, _, err := executeCommand(t, "use", "foo")
-	if err == nil || !strings.Contains(err.Error(), "accepts at most 1 arg") {
-		t.Fatalf("expected root arg-count error for removed use command, got %v", err)
+	if err == nil {
+		t.Fatal("expected error for removed use command")
+	}
+	if cmd, _, findErr := NewRootCommand().Find([]string{"use"}); findErr == nil && cmd.Name() == "use" {
+		t.Fatal("use command should not be registered")
 	}
 }
 
@@ -124,12 +127,38 @@ func TestReservedAccountNameIsNotSwitchable(t *testing.T) {
 	}
 }
 
-func TestHiddenSwitchTreatsFlagsAsAccountNames(t *testing.T) {
+func TestHiddenSwitchRejectsFlagLikeAccountNames(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DOCKER_USE_DIR", root)
 	_, _, err := executeCommand(t, "__switch", "--", "--version")
 	if err == nil || !strings.Contains(err.Error(), "invalid account name") {
 		t.Fatalf("expected invalid account error, got %v", err)
+	}
+}
+
+func TestCurrentCommandPrintsPersistedAccount(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DOCKER_USE_DIR", root)
+	accountPath := filepath.Join(root, "foo")
+	if err := os.MkdirAll(accountPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".current"), []byte("foo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := executeCommand(t, "__current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != accountPath {
+		t.Fatalf("current output = %q, want %q", out, accountPath)
+	}
+}
+
+func TestShellNameDoesNotGuessUnsupportedShell(t *testing.T) {
+	t.Setenv("SHELL", "/usr/bin/nu")
+	if got := shellName(); got != "" {
+		t.Fatalf("shellName = %q, want empty", got)
 	}
 }
 

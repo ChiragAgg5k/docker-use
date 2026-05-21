@@ -63,6 +63,22 @@ func TestNewStorePermissions(t *testing.T) {
 	}
 }
 
+func TestNewStoreRejectsSymlinkRoot(t *testing.T) {
+	parent := t.TempDir()
+	target := filepath.Join(parent, "target")
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "accounts")
+	if err := os.Symlink(target, root); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	t.Setenv("DOCKER_USE_DIR", root)
+	if _, err := NewStore(); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected symlink root error, got %v", err)
+	}
+}
+
 func TestOpenStoreDoesNotCreateRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "accounts")
 	t.Setenv("DOCKER_USE_DIR", root)
@@ -251,7 +267,7 @@ func TestAddCleansUpNewAccountOnDockerLoginFailure(t *testing.T) {
 	}
 }
 
-func TestStripCredentialHelpers(t *testing.T) {
+func TestNormalizeDockerConfig(t *testing.T) {
 	dir, err := os.MkdirTemp("", "docker-use-config-*")
 	if err != nil {
 		t.Fatal(err)
@@ -270,7 +286,7 @@ func TestStripCredentialHelpers(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(input), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := stripCredentialHelpers(configPath); err != nil {
+	if err := normalizeDockerConfig(configPath); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(configPath)
@@ -290,6 +306,18 @@ func TestStripCredentialHelpers(t *testing.T) {
 	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("home dir unavailable: %v", err)
+	}
+	wantPlugins := filepath.Join(home, ".docker", "cli-plugins")
+	extras, ok := parsed["cliPluginsExtraDirs"].([]any)
+	if !ok {
+		t.Fatalf("cliPluginsExtraDirs missing or wrong type: %T", parsed["cliPluginsExtraDirs"])
+	}
+	if len(extras) != 1 || extras[0] != wantPlugins {
+		t.Fatalf("cliPluginsExtraDirs = %v, want [%q]", extras, wantPlugins)
 	}
 	info, err := os.Stat(configPath)
 	if err != nil {
@@ -350,6 +378,37 @@ func TestSaveAndLoadCurrent(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Fatalf("current file mode = %o, want 600", got)
+	}
+}
+
+func TestCurrentRejectsSymlinkCurrentFile(t *testing.T) {
+	s := tmpStore(t)
+	target := filepath.Join(t.TempDir(), "current")
+	if err := os.WriteFile(target, []byte("foo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(s.Root, currentAccountFile)); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	if _, _, err := s.Current(); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected symlink current error, got %v", err)
+	}
+}
+
+func TestCurrentReturnsRealAccountErrors(t *testing.T) {
+	s := tmpStore(t)
+	target := filepath.Join(t.TempDir(), "target")
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(s.Root, "foo")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(s.Root, currentAccountFile), []byte("foo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Current(); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected symlink account error, got %v", err)
 	}
 }
 

@@ -50,6 +50,11 @@ func NewStore() (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if info, err := os.Lstat(root); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("account root %q is a symlink", root)
+	} else if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, err
 	}
@@ -135,14 +140,15 @@ func (s Store) Path(name string) (string, error) {
 	if err := validateName(name); err != nil {
 		return "", err
 	}
-	return filepath.Join(s.Root, name), nil
+	return s.accountPath(name), nil
 }
 
-func (s Store) existingAccountPath(name string) (string, error) {
-	p, err := s.Path(name)
-	if err != nil {
-		return "", err
-	}
+func (s Store) accountPath(name string) string {
+	return filepath.Join(s.Root, name)
+}
+
+func (s Store) existingValidatedAccountPath(name string) (string, error) {
+	p := s.accountPath(name)
 	info, err := os.Lstat(p)
 	if err != nil {
 		return "", err
@@ -156,6 +162,13 @@ func (s Store) existingAccountPath(name string) (string, error) {
 	return p, nil
 }
 
+func (s Store) existingAccountPath(name string) (string, error) {
+	if err := validateName(name); err != nil {
+		return "", err
+	}
+	return s.existingValidatedAccountPath(name)
+}
+
 // Exists reports whether an account directory exists.
 func (s Store) Exists(name string) bool {
 	_, err := s.existingAccountPath(name)
@@ -167,7 +180,7 @@ func (s Store) Export(name string) (string, error) {
 	if err := validateName(name); err != nil {
 		return "", err
 	}
-	p, err := s.existingAccountPath(name)
+	p, err := s.existingValidatedAccountPath(name)
 	if err != nil {
 		return "", fmt.Errorf("account %q does not exist", name)
 	}
@@ -180,7 +193,7 @@ func (s Store) SaveCurrent(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(s.Root, currentAccountFile), []byte(name+"\n"), 0o600); err != nil {
+	if err := atomicWriteFile(filepath.Join(s.Root, currentAccountFile), []byte(name+"\n"), 0o600); err != nil {
 		return "", err
 	}
 	return p, nil
@@ -188,20 +201,34 @@ func (s Store) SaveCurrent(name string) (string, error) {
 
 // Current returns the persisted account and path, or empty values when unset.
 func (s Store) Current() (string, string, error) {
-	data, err := os.ReadFile(filepath.Join(s.Root, currentAccountFile))
+	currentPath := filepath.Join(s.Root, currentAccountFile)
+	info, err := os.Lstat(currentPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", "", nil
 		}
 		return "", "", err
 	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", "", fmt.Errorf("current account file is a symlink")
+	}
+	data, err := os.ReadFile(currentPath)
+	if err != nil {
+		return "", "", err
+	}
 	name := strings.TrimSpace(string(data))
 	if name == "" {
 		return "", "", nil
 	}
-	p, err := s.Export(name)
+	if err := validateName(name); err != nil {
+		return "", "", err
+	}
+	p, err := s.existingValidatedAccountPath(name)
 	if err != nil {
-		return "", "", nil
+		if os.IsNotExist(err) {
+			return "", "", nil
+		}
+		return "", "", err
 	}
 	return name, p, nil
 }
@@ -289,9 +316,9 @@ func (s Store) Add(ctx context.Context, name, username string, force bool) error
 	}
 
 	configPath := filepath.Join(p, "config.json")
-	if err := stripCredentialHelpers(configPath); err != nil {
+	if err := normalizeDockerConfig(configPath); err != nil {
 		_ = os.RemoveAll(p)
-		return fmt.Errorf("failed to strip credsStore: %w", err)
+		return fmt.Errorf("failed to normalize docker config: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(p, usernameFile), []byte(username+"\n"), 0o600); err != nil {
 		_ = os.RemoveAll(p)
@@ -300,8 +327,10 @@ func (s Store) Add(ctx context.Context, name, username string, force bool) error
 	return nil
 }
 
-// stripCredentialHelpers removes credsStore and credHelpers from a Docker config file.
-func stripCredentialHelpers(configPath string) error {
+// normalizeDockerConfig strips credential helpers and points the account at the
+// user's default cli-plugins directory so `docker compose` and friends keep
+// working when DOCKER_CONFIG is redirected to the account.
+func normalizeDockerConfig(configPath string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return err
@@ -312,24 +341,31 @@ func stripCredentialHelpers(configPath string) error {
 	}
 	delete(config, "credsStore")
 	delete(config, "credHelpers")
+	if home, err := os.UserHomeDir(); err == nil {
+		config["cliPluginsExtraDirs"] = []string{filepath.Join(home, ".docker", "cli-plugins")}
+	}
 	out, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return err
 	}
 	out = append(out, '\n')
-	dir := filepath.Dir(configPath)
-	tmp, err := os.CreateTemp(dir, ".config.json.*")
+	return atomicWriteFile(configPath, out, 0o600)
+}
+
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*")
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
 
-	if err := tmp.Chmod(0o600); err != nil {
+	if err := tmp.Chmod(perm); err != nil {
 		_ = tmp.Close()
 		return err
 	}
-	if _, err := tmp.Write(out); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err
 	}
@@ -340,13 +376,10 @@ func stripCredentialHelpers(configPath string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpName, configPath); err != nil {
+	if err := os.Rename(tmpName, path); err != nil {
 		return err
 	}
-	if err := fsyncDir(dir); err != nil {
-		return err
-	}
-	return nil
+	return fsyncDir(dir)
 }
 
 func fsyncDir(dir string) error {

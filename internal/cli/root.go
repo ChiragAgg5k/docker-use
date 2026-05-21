@@ -10,14 +10,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var Version = "dev"
+const defaultVersion = "dev"
 
-func NewRootCommand() *cobra.Command {
+func NewRootCommand(version ...string) *cobra.Command {
+	cmdVersion := defaultVersion
+	if len(version) > 0 && version[0] != "" {
+		cmdVersion = version[0]
+	}
 	root := &cobra.Command{
 		Use:          "docker-use [account]",
 		Short:        "Manage multiple Docker Hub accounts",
 		Long:         "docker-use lets you switch between Docker Hub accounts by isolating configs in ~/.docker-accounts.",
-		Version:      Version,
+		Version:      cmdVersion,
 		SilenceUsage: true,
 		Args:         cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -30,7 +34,11 @@ func NewRootCommand() *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Account %q is available at %s\n", args[0], path)
-			fmt.Fprintf(cmd.OutOrStdout(), "To switch this shell, run: eval \"$(%s init %s)\" then docker-use %s\n", initCommand(), shellName(), args[0])
+			if shell := shellName(); shell != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "To switch this shell, run: eval \"$(%s init %s)\" then docker-use %s\n", initCommand(), shell, args[0])
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "To switch this shell, run: eval \"$(%s init <bash|fish|zsh>)\" then docker-use %s\n", initCommand(), args[0])
+			}
 			return nil
 		},
 	}
@@ -129,6 +137,6 @@ func shellName() string {
 	case "bash", "fish", "zsh":
 		return name
 	default:
-		return "zsh"
+		return ""
 	}
 }

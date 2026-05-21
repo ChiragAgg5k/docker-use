@@ -36,9 +36,22 @@ func TestInitScript(t *testing.T) {
 		if !strings.Contains(script, "__current") {
 			t.Errorf("%s script missing current account restore", shell)
 		}
+		if !strings.Contains(script, "__current 2>/dev/null") {
+			t.Errorf("%s script should silence missing binary during current restore", shell)
+		}
+		if shell == "fish" {
+			if !strings.Contains(script, "if not set -q DOCKER_CONFIG") {
+				t.Errorf("fish script should not auto-restore over an existing DOCKER_CONFIG")
+			}
+			if !strings.Contains(script, "set --erase docker_use_config") {
+				t.Errorf("fish script should erase docker_use_config after auto-restore")
+			}
+		} else if !strings.Contains(script, "[ -z \"${DOCKER_CONFIG:-}\" ]") {
+			t.Errorf("%s script should not auto-restore over an existing DOCKER_CONFIG", shell)
+		}
 		for _, command := range []string{"add", "remove", "whoami", "completion"} {
-			if strings.Contains(script, `"`+command+`"`) || strings.Contains(script, " "+command+" ") {
-				t.Errorf("%s script should not hardcode command allowlist entry %q", shell, command)
+			if !strings.Contains(script, command) {
+				t.Errorf("%s script should route management command %q directly", shell, command)
 			}
 		}
 	}
