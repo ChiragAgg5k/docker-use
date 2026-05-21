@@ -6,6 +6,12 @@
 
 Manage multiple Docker Hub accounts from the command line.
 
+## Why
+
+Docker only reads credentials from the active `DOCKER_CONFIG`, which makes switching between personal, work, and automation accounts awkward. You either keep logging in and out, manually juggle config directories, or risk pushing and pulling with the wrong account.
+
+`docker-use` keeps each account in its own isolated Docker config and lets your shell switch between them by name.
+
 ## Install
 
 ```sh
