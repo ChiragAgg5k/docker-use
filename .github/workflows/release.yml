@@ -22,6 +22,12 @@ jobs:
         with:
           go-version: "1.24"
 
+      - name: Debug files
+        run: |
+          pwd
+          ls -la
+          ls -la cmd/ || true
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
