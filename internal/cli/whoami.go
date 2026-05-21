@@ -1,0 +1,39 @@
+package cli
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/chiragagg5k/docker-use/internal/accounts"
+	"github.com/spf13/cobra"
+)
+
+func newWhoamiCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "whoami",
+		Short: "Show current account",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			config := os.Getenv("DOCKER_CONFIG")
+			if config == "" {
+				fmt.Fprintln(cmd.OutOrStdout(), "DOCKER_CONFIG is not set.")
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "DOCKER_CONFIG=%s\n", config)
+
+			acc := accounts.CurrentFromEnv()
+			if acc == "" {
+				acc = "unknown"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Account: %s\n", acc)
+
+			configPath := filepath.Join(config, "config.json")
+			user, err := accounts.DockerHubUsername(configPath)
+			if err != nil || user == "" {
+				user = "unknown"
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Docker Hub user: %s\n", user)
+			return nil
+		},
+	}
+}
