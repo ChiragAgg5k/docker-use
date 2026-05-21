@@ -7,8 +7,8 @@ before:
     - go mod tidy
 
 builds:
-  - dir: ./cmd/docker-use
-    main: .
+  - dir: .
+    main: ./cmd/docker-use/main.go
     env:
       - CGO_ENABLED=0
     goos:
