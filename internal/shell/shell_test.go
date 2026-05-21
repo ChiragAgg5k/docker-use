@@ -24,6 +24,15 @@ func TestInitScript(t *testing.T) {
 		if !strings.Contains(script, "DOCKER_CONFIG") {
 			t.Errorf("%s script missing DOCKER_CONFIG assignment", shell)
 		}
+		if strings.Contains(script, "path=") || strings.Contains(script, "set -l path") {
+			t.Errorf("%s script must not assign to path; zsh treats it as a special PATH-tied variable", shell)
+		}
+		if !strings.Contains(script, "docker_use_config") {
+			t.Errorf("%s script missing bare account switch variable", shell)
+		}
+		if !strings.Contains(script, "__path") {
+			t.Errorf("%s script missing hidden path command", shell)
+		}
 	}
 }
 

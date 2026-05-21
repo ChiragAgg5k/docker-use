@@ -20,22 +20,48 @@ func executeCommand(t *testing.T, args ...string) (string, string, error) {
 	return out.String(), errOut.String(), err
 }
 
-func TestUsePrintsOnlyPath(t *testing.T) {
+func TestBareAccountPrintsHumanMessage(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DOCKER_USE_DIR", root)
 	accountPath := filepath.Join(root, "foo")
 	if err := os.MkdirAll(accountPath, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	out, _, err := executeCommand(t, "use", "foo")
+	out, _, err := executeCommand(t, "foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `Account "foo" is available at `+accountPath) {
+		t.Fatalf("output = %q, want account message with path %q", out, accountPath)
+	}
+	if !strings.Contains(out, "To switch this shell") {
+		t.Fatalf("output = %q, want shell wrapper instruction", out)
+	}
+	if !strings.Contains(out, " init zsh)") {
+		t.Fatalf("output = %q, want init command instruction", out)
+	}
+}
+
+func TestHiddenPathCommandPrintsOnlyPath(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DOCKER_USE_DIR", root)
+	accountPath := filepath.Join(root, "foo")
+	if err := os.MkdirAll(accountPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := executeCommand(t, "__path", "foo")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(out) != accountPath {
 		t.Fatalf("output = %q, want path %q", out, accountPath)
 	}
-	if strings.Contains(out, "export") {
-		t.Fatalf("use output must not contain shell code: %q", out)
+}
+
+func TestUseCommandIsRemoved(t *testing.T) {
+	_, _, err := executeCommand(t, "use", "foo")
+	if err == nil {
+		t.Fatal("expected use to be treated as an invalid account, not a subcommand")
 	}
 }
 

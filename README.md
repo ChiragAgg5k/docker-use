@@ -19,7 +19,7 @@ Add the following to your shell rc file (e.g., `~/.zshrc`):
 eval "$(docker-use init zsh)"
 ```
 
-The generated wrapper calls `docker-use use <name>` and assigns the returned path to `DOCKER_CONFIG` without shell `eval` during account switching.
+The generated wrapper calls `docker-use <name>` and assigns the returned path to `DOCKER_CONFIG` without shell `eval` during account switching.
 
 Supported shells: `zsh`, `bash`, `fish`.
 
@@ -31,7 +31,7 @@ docker-use whoami                # show current account
 docker-use add <name> -u <user>  # add a new account (interactive docker login)
 docker-use add <name> -u <user> --force  # replace an existing account
 docker-use remove <name>         # remove an account (with confirmation)
-docker-use use <name>            # switch to an account (requires shell wrapper)
+docker-use <name>                # switch to an account (requires shell wrapper)
 ```
 
 ## How it works
