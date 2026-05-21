@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.png" alt="docker-use banner">
+</p>
+
 # docker-use
 
 Manage multiple Docker Hub accounts from the command line.
