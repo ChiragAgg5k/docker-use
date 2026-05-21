@@ -1,5 +1,5 @@
 # Binaries
-docker-use
+/docker-use
 *.exe
 *.dll
 *.so
