@@ -213,6 +213,13 @@ JSON
 	if strings.Contains(string(configData), "credsStore") {
 		t.Fatal("expected Add to strip credsStore")
 	}
+	username, err := s.Username("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if username != "alice" {
+		t.Fatalf("username = %q, want alice", username)
+	}
 	if err := os.WriteFile(filepath.Join(accountPath, "marker"), []byte("old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -357,6 +364,20 @@ func TestCurrentIgnoresStaleAccount(t *testing.T) {
 	}
 	if name != "" || path != "" {
 		t.Fatalf("current = %q, %q; want empty", name, path)
+	}
+}
+
+func TestUsernameMissingReturnsEmpty(t *testing.T) {
+	s := tmpStore(t)
+	if err := os.MkdirAll(filepath.Join(s.Root, "foo"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	username, err := s.Username("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if username != "" {
+		t.Fatalf("username = %q, want empty", username)
 	}
 }
 

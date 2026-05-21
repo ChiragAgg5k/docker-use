@@ -188,3 +188,26 @@ func TestWhoamiCorruptConfigReturnsError(t *testing.T) {
 		t.Fatal("expected corrupt config error")
 	}
 }
+
+func TestWhoamiFallsBackToStoredUsername(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DOCKER_USE_DIR", root)
+	accountPath := filepath.Join(root, "foo")
+	if err := os.MkdirAll(accountPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(accountPath, "config.json"), []byte(`{"auths":{"https://index.docker.io/v1/":{}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(accountPath, ".username"), []byte("alice\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DOCKER_CONFIG", accountPath)
+	out, _, err := executeCommand(t, "whoami")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Docker Hub user: alice") {
+		t.Fatalf("output = %q, want stored username", out)
+	}
+}

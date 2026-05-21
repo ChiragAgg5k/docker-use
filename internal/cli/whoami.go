@@ -44,6 +44,14 @@ func newWhoamiCommand() *cobra.Command {
 				return err
 			}
 			if user == "" {
+				if acc != "unknown" {
+					user, err = store.Username(acc)
+					if err != nil {
+						return err
+					}
+				}
+			}
+			if user == "" {
 				fmt.Fprintln(cmd.OutOrStdout(), "Docker Hub user: not logged in")
 				return nil
 			}

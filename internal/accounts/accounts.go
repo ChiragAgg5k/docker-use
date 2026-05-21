@@ -39,7 +39,10 @@ type Account struct {
 	Path string
 }
 
-const currentAccountFile = ".current"
+const (
+	currentAccountFile = ".current"
+	usernameFile       = ".username"
+)
 
 // NewStore creates a Store, defaulting to ~/.docker-accounts or DOCKER_USE_DIR.
 func NewStore() (*Store, error) {
@@ -203,6 +206,30 @@ func (s Store) Current() (string, string, error) {
 	return name, p, nil
 }
 
+// Username returns the Docker Hub username saved when the account was added.
+func (s Store) Username(name string) (string, error) {
+	p, err := s.Export(name)
+	if err != nil {
+		return "", err
+	}
+	usernamePath := filepath.Join(p, usernameFile)
+	info, err := os.Lstat(usernamePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("username file for account %q is a symlink", name)
+	}
+	data, err := os.ReadFile(usernamePath)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
 // Remove deletes an account directory.
 func (s Store) Remove(name string) error {
 	p, err := s.existingAccountPath(name)
@@ -265,6 +292,10 @@ func (s Store) Add(ctx context.Context, name, username string, force bool) error
 	if err := stripCredentialHelpers(configPath); err != nil {
 		_ = os.RemoveAll(p)
 		return fmt.Errorf("failed to strip credsStore: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(p, usernameFile), []byte(username+"\n"), 0o600); err != nil {
+		_ = os.RemoveAll(p)
+		return fmt.Errorf("failed to save username: %w", err)
 	}
 	return nil
 }
