@@ -5,11 +5,17 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
+	"unicode"
 )
+
+var accountNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
 
 // Store manages docker-use accounts on disk.
 type Store struct {
@@ -32,7 +38,10 @@ func NewStore() (*Store, error) {
 		}
 		root = filepath.Join(home, ".docker-accounts")
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(root, 0o700); err != nil {
 		return nil, err
 	}
 	return &Store{Root: root}, nil
@@ -40,14 +49,23 @@ func NewStore() (*Store, error) {
 
 // validateName rejects path-unsafe account names.
 func validateName(name string) error {
-	if name == "" || name == "." || name == ".." {
+	if !accountNamePattern.MatchString(name) {
 		return fmt.Errorf("invalid account name: %q", name)
 	}
-	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
-		return fmt.Errorf("account name cannot contain path separators: %q", name)
+	return nil
+}
+
+func validateUsername(username string) error {
+	if username == "" {
+		return fmt.Errorf("username cannot be empty")
 	}
-	if strings.TrimSpace(name) == "" {
-		return fmt.Errorf("account name cannot be whitespace only")
+	if strings.HasPrefix(username, "-") {
+		return fmt.Errorf("username cannot start with '-'")
+	}
+	for _, r := range username {
+		if unicode.IsSpace(r) || unicode.IsControl(r) || strings.ContainsRune(";&|`$<>(){}[]*?!\\\"'", r) {
+			return fmt.Errorf("username contains unsafe character %q", r)
+		}
 	}
 	return nil
 }
@@ -72,6 +90,7 @@ func (s Store) List() ([]Account, error) {
 			Path: filepath.Join(s.Root, name),
 		})
 	}
+	sort.Slice(accs, func(i, j int) bool { return accs[i].Name < accs[j].Name })
 	return accs, nil
 }
 
@@ -83,56 +102,89 @@ func (s Store) Path(name string) (string, error) {
 	return filepath.Join(s.Root, name), nil
 }
 
-// Exists reports whether an account directory exists.
-func (s Store) Exists(name string) bool {
-	p, err := s.Path(name)
-	if err != nil {
-		return false
-	}
-	info, err := os.Stat(p)
-	return err == nil && info.IsDir()
-}
-
-// Export returns the shell export line for an account.
-func (s Store) Export(name string) (string, error) {
+func (s Store) existingAccountPath(name string) (string, error) {
 	p, err := s.Path(name)
 	if err != nil {
 		return "", err
 	}
-	info, err := os.Stat(p)
-	if err != nil || !info.IsDir() {
-		return "", fmt.Errorf("account %q does not exist", name)
+	info, err := os.Lstat(p)
+	if err != nil {
+		return "", err
 	}
-	return fmt.Sprintf("export DOCKER_CONFIG=%q", p), nil
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("account %q is a symlink", name)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("account %q is not a directory", name)
+	}
+	return p, nil
 }
 
-// Remove deletes an account directory with confirmation unless force is true.
-func (s Store) Remove(name string, force bool) error {
-	if !s.Exists(name) {
+// Exists reports whether an account directory exists.
+func (s Store) Exists(name string) bool {
+	_, err := s.existingAccountPath(name)
+	return err == nil
+}
+
+// Export returns the account directory for shell wrappers.
+func (s Store) Export(name string) (string, error) {
+	p, err := s.existingAccountPath(name)
+	if err != nil {
+		return "", fmt.Errorf("account %q does not exist", name)
+	}
+	return p, nil
+}
+
+// Remove deletes an account directory.
+func (s Store) Remove(name string) error {
+	p, err := s.existingAccountPath(name)
+	if err != nil {
 		return fmt.Errorf("account %q does not exist", name)
 	}
-	if !force {
-		// We'll read from stdin; callers can pipe "y\n" in tests.
-		fmt.Fprintf(os.Stderr, "Remove account %q? [y/N]: ", name)
-		var answer string
-		if _, err := fmt.Fscanln(os.Stdin, &answer); err != nil {
-			return fmt.Errorf("aborted")
-		}
-		if strings.ToLower(strings.TrimSpace(answer)) != "y" {
-			return fmt.Errorf("aborted")
-		}
+	root, err := filepath.Abs(s.Root)
+	if err != nil {
+		return err
 	}
-	p, _ := s.Path(name)
+	target, err := filepath.Abs(p)
+	if err != nil {
+		return err
+	}
+	root = filepath.Clean(root)
+	target = filepath.Clean(target)
+	if target != root && !strings.HasPrefix(target, root+string(os.PathSeparator)) {
+		return fmt.Errorf("refusing to remove path outside account root: %s", target)
+	}
 	return os.RemoveAll(p)
 }
 
 // Add creates an account, runs docker login, and strips credential helpers.
-func (s Store) Add(ctx context.Context, name, username string) error {
+func (s Store) Add(ctx context.Context, name, username string, force bool) error {
 	if err := validateName(name); err != nil {
 		return err
 	}
+	if err := validateUsername(username); err != nil {
+		return err
+	}
 	p := filepath.Join(s.Root, name)
-	if err := os.MkdirAll(p, 0o755); err != nil {
+	if _, err := s.existingAccountPath(name); err == nil {
+		if !force {
+			return fmt.Errorf("account %q already exists; use --force to replace it", name)
+		}
+		if err := s.Remove(name); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	created := false
+	if err := os.MkdirAll(p, 0o700); err != nil {
+		return err
+	}
+	created = true
+	if err := os.Chmod(p, 0o700); err != nil {
+		if created {
+			_ = os.RemoveAll(p)
+		}
 		return err
 	}
 
@@ -141,11 +193,17 @@ func (s Store) Add(ctx context.Context, name, username string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
+		if created {
+			_ = os.RemoveAll(p)
+		}
 		return fmt.Errorf("docker login failed: %w", err)
 	}
 
 	configPath := filepath.Join(p, "config.json")
 	if err := stripCredentialHelpers(configPath); err != nil {
+		if created {
+			_ = os.RemoveAll(p)
+		}
 		return fmt.Errorf("failed to strip credsStore: %w", err)
 	}
 	return nil
@@ -168,24 +226,89 @@ func stripCredentialHelpers(configPath string) error {
 		return err
 	}
 	out = append(out, '\n')
-	return os.WriteFile(configPath, out, 0o600)
+	dir := filepath.Dir(configPath)
+	tmp, err := os.CreateTemp(dir, ".config.json.*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(out); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, configPath); err != nil {
+		return err
+	}
+	if err := fsyncDir(dir); err != nil {
+		return err
+	}
+	return nil
 }
 
-// CurrentFromEnv returns the account name inferred from DOCKER_CONFIG, or empty.
-func CurrentFromEnv() string {
+func fsyncDir(dir string) error {
+	f, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil && err != io.ErrUnexpectedEOF {
+		return err
+	}
+	return nil
+}
+
+// CurrentFromEnv returns the current account when DOCKER_CONFIG points under the store root.
+func CurrentFromEnv(store *Store) (string, error) {
+	if store == nil {
+		var err error
+		store, err = NewStore()
+		if err != nil {
+			return "", err
+		}
+	}
 	p := os.Getenv("DOCKER_CONFIG")
 	if p == "" {
-		return ""
+		return "", nil
 	}
-	// Expects ~/.docker-accounts/<name>/config.json or at least ~/.docker-accounts/<name>
-	// But DOCKER_CONFIG points to the *dir* containing config.json.
-	base := filepath.Base(p)
-	parent := filepath.Dir(p)
-	if base == "config.json" {
-		parent = filepath.Dir(parent)
-		base = filepath.Base(parent)
+	root, err := filepath.Abs(store.Root)
+	if err != nil {
+		return "", err
 	}
-	return base
+	config, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	root = filepath.Clean(root)
+	config = filepath.Clean(config)
+	if config == root || !strings.HasPrefix(config, root+string(os.PathSeparator)) {
+		return "", nil
+	}
+	rel, err := filepath.Rel(root, config)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return "", err
+	}
+	parts := strings.Split(rel, string(os.PathSeparator))
+	if len(parts) != 1 {
+		return "", nil
+	}
+	name := parts[0]
+	if _, err := store.existingAccountPath(name); err != nil {
+		return "", nil
+	}
+	return name, nil
 }
 
 // DockerHubUsername reads the auths section of a Docker config and returns the
@@ -203,16 +326,16 @@ func DockerHubUsername(configPath string) (string, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return "", err
 	}
-	for reg, cred := range config.Auths {
-		if strings.Contains(reg, "docker.io") {
-			if cred.Auth != "" {
-				decoded, err := base64.StdEncoding.DecodeString(cred.Auth)
-				if err == nil {
-					parts := strings.SplitN(string(decoded), ":", 2)
-					if len(parts) > 0 && parts[0] != "" {
-						return parts[0], nil
-					}
-				}
+	for _, reg := range []string{"https://index.docker.io/v1/", "index.docker.io", "registry-1.docker.io", "docker.io"} {
+		cred, ok := config.Auths[reg]
+		if !ok || cred.Auth == "" {
+			continue
+		}
+		decoded, err := base64.StdEncoding.DecodeString(cred.Auth)
+		if err == nil {
+			parts := strings.SplitN(string(decoded), ":", 2)
+			if len(parts) > 0 && parts[0] != "" {
+				return parts[0], nil
 			}
 		}
 	}

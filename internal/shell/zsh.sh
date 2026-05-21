@@ -1,7 +1,8 @@
 docker-use() {
   if [ "$1" = "use" ]; then
     shift
-    eval "$("{{ .Binary }}" use "$@")"
+    path="$("{{ .Binary }}" use "$@")" || return
+    export DOCKER_CONFIG="$path"
   else
     "{{ .Binary }}" "$@"
   fi

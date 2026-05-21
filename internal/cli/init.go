@@ -9,9 +9,9 @@ import (
 
 func newInitCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "init <shell>",
-		Short: "Print shell integration script",
-		Args:  cobra.ExactArgs(1),
+		Use:       "init <shell>",
+		Short:     "Print shell integration script",
+		Args:      cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 		ValidArgs: []string{"zsh", "bash", "fish"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			script, err := shell.InitScript(args[0])

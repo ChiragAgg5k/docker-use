@@ -17,11 +17,11 @@ func newUseCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			line, err := store.Export(args[0])
+			path, err := store.Export(args[0])
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), line)
+			fmt.Fprintln(cmd.OutOrStdout(), path)
 			return nil
 		},
 	}

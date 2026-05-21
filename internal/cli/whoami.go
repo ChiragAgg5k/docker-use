@@ -21,7 +21,14 @@ func newWhoamiCommand() *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "DOCKER_CONFIG=%s\n", config)
 
-			acc := accounts.CurrentFromEnv()
+			store, err := accounts.NewStore()
+			if err != nil {
+				return err
+			}
+			acc, err := accounts.CurrentFromEnv(store)
+			if err != nil {
+				return err
+			}
 			if acc == "" {
 				acc = "unknown"
 			}
@@ -29,8 +36,16 @@ func newWhoamiCommand() *cobra.Command {
 
 			configPath := filepath.Join(config, "config.json")
 			user, err := accounts.DockerHubUsername(configPath)
-			if err != nil || user == "" {
-				user = "unknown"
+			if err != nil {
+				if os.IsNotExist(err) {
+					fmt.Fprintln(cmd.OutOrStdout(), "Docker Hub user: not logged in")
+					return nil
+				}
+				return err
+			}
+			if user == "" {
+				fmt.Fprintln(cmd.OutOrStdout(), "Docker Hub user: not logged in")
+				return nil
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Docker Hub user: %s\n", user)
 			return nil

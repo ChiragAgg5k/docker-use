@@ -18,6 +18,12 @@ func TestInitScript(t *testing.T) {
 		if !strings.Contains(script, "docker-use") {
 			t.Errorf("%s script missing binary path reference", shell)
 		}
+		if strings.Contains(script, "eval") {
+			t.Errorf("%s script must not use eval", shell)
+		}
+		if !strings.Contains(script, "DOCKER_CONFIG") {
+			t.Errorf("%s script missing DOCKER_CONFIG assignment", shell)
+		}
 	}
 }
 

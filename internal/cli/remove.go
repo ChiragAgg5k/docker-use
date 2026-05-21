@@ -1,6 +1,12 @@
 package cli
 
 import (
+	"bufio"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+
 	"github.com/chiragagg5k/docker-use/internal/accounts"
 	"github.com/spf13/cobra"
 )
@@ -17,7 +23,20 @@ func newRemoveCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return store.Remove(args[0], force)
+			if !force {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Remove account %q? [y/N]: ", args[0])
+				answer, err := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
+				if err != nil && !errors.Is(err, io.EOF) {
+					return fmt.Errorf("failed to read confirmation: %w", err)
+				}
+				if err != nil && errors.Is(err, io.EOF) && answer == "" {
+					return fmt.Errorf("failed to read confirmation: %w", err)
+				}
+				if strings.ToLower(strings.TrimSpace(answer)) != "y" {
+					return fmt.Errorf("aborted")
+				}
+			}
+			return store.Remove(args[0])
 		},
 	}
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
