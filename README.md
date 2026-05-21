@@ -48,4 +48,4 @@ docker-use <name>                # switch to an account (requires shell wrapper)
 
 Each account lives in `~/.docker-accounts/<name>/config.json`. Account names must match `^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`. When you `use` an account, the shell wrapper sets `DOCKER_CONFIG` to that directory, so `docker` commands use the right credentials.
 
-During `add`, `docker-use` shells out to `docker login`, then strips `credsStore` and `credHelpers` from the generated config so credentials stay in the isolated config file.
+During `add`, `docker-use` shells out to `docker login`, then preserves Docker's generated credential helper settings such as `credsStore: osxkeychain` so Docker Desktop and platform keychains keep working inside the selected account config.

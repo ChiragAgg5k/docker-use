@@ -226,8 +226,8 @@ JSON
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(configData), "credsStore") {
-		t.Fatal("expected Add to strip credsStore")
+	if !strings.Contains(string(configData), `"credsStore": "osxkeychain"`) {
+		t.Fatal("expected Add to preserve credsStore")
 	}
 	username, err := s.Username("foo")
 	if err != nil {
@@ -294,11 +294,11 @@ func TestNormalizeDockerConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := string(data)
-	if strings.Contains(out, "credsStore") {
-		t.Error("expected credsStore to be removed")
+	if !strings.Contains(out, `"credsStore": "osxkeychain"`) {
+		t.Error("expected credsStore to be preserved")
 	}
-	if strings.Contains(out, "credHelpers") {
-		t.Error("expected credHelpers to be removed")
+	if !strings.Contains(out, `"credHelpers"`) || !strings.Contains(out, `"ghcr.io": "ghcr"`) {
+		t.Error("expected credHelpers to be preserved")
 	}
 	if !strings.Contains(out, "auths") {
 		t.Error("expected auths to be preserved")

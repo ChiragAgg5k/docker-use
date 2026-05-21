@@ -279,7 +279,7 @@ func (s Store) Remove(name string) error {
 	return os.RemoveAll(p)
 }
 
-// Add creates an account, runs docker login, and strips credential helpers.
+// Add creates an account, runs docker login, and normalizes the config.
 func (s Store) Add(ctx context.Context, name, username string, force bool) error {
 	if err := validateName(name); err != nil {
 		return err
@@ -327,9 +327,10 @@ func (s Store) Add(ctx context.Context, name, username string, force bool) error
 	return nil
 }
 
-// normalizeDockerConfig strips credential helpers and points the account at the
-// user's default cli-plugins directory so `docker compose` and friends keep
-// working when DOCKER_CONFIG is redirected to the account.
+// normalizeDockerConfig points the account at the user's default cli-plugins
+// directory so `docker compose` and friends keep working when DOCKER_CONFIG is
+// redirected to the account. Credential helper settings are preserved because
+// Docker Desktop stores login tokens in the platform keychain.
 func normalizeDockerConfig(configPath string) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -339,8 +340,6 @@ func normalizeDockerConfig(configPath string) error {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return err
 	}
-	delete(config, "credsStore")
-	delete(config, "credHelpers")
 	if home, err := os.UserHomeDir(); err == nil {
 		config["cliPluginsExtraDirs"] = []string{filepath.Join(home, ".docker", "cli-plugins")}
 	}
