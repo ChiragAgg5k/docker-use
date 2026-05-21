@@ -1,10 +1,13 @@
 function docker-use
-  if contains -- "$argv[1]" add remove rm list ls whoami init completion help --help -h; or test (count $argv) -eq 0
-    "{{ .Binary }}" $argv
-  else
-    set -l docker_use_config ("{{ .Binary }}" __path $argv)
-    or return
+  set -l docker_use_config ("{{ .Binary }}" __switch -- $argv 2>/dev/null)
+  if test $status -eq 0
     set -gx DOCKER_CONFIG "$docker_use_config"
     printf 'Switched Docker account to %s\n' "$argv[1]"
+  else
+    "{{ .Binary }}" $argv
   end
+end
+set -l docker_use_config ("{{ .Binary }}" __current)
+if test -n "$docker_use_config"
+  set -gx DOCKER_CONFIG "$docker_use_config"
 end

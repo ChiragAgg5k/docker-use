@@ -30,7 +30,7 @@ func newRemoveCommand() *cobra.Command {
 					return fmt.Errorf("failed to read confirmation: %w", err)
 				}
 				if err != nil && errors.Is(err, io.EOF) && answer == "" {
-					return fmt.Errorf("failed to read confirmation: %w", err)
+					return fmt.Errorf("aborted")
 				}
 				if strings.ToLower(strings.TrimSpace(answer)) != "y" {
 					return fmt.Errorf("aborted")

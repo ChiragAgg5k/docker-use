@@ -13,7 +13,7 @@ var (
 )
 
 func main() {
-	_, _, _ = version, commit, date
+	cli.Version = version
 	if err := cli.NewRootCommand().Execute(); err != nil {
 		os.Exit(1)
 	}

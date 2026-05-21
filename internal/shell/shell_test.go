@@ -30,8 +30,16 @@ func TestInitScript(t *testing.T) {
 		if !strings.Contains(script, "docker_use_config") {
 			t.Errorf("%s script missing bare account switch variable", shell)
 		}
-		if !strings.Contains(script, "__path") {
-			t.Errorf("%s script missing hidden path command", shell)
+		if !strings.Contains(script, "__switch") {
+			t.Errorf("%s script missing hidden switch command", shell)
+		}
+		if !strings.Contains(script, "__current") {
+			t.Errorf("%s script missing current account restore", shell)
+		}
+		for _, command := range []string{"add", "remove", "whoami", "completion"} {
+			if strings.Contains(script, `"`+command+`"`) || strings.Contains(script, " "+command+" ") {
+				t.Errorf("%s script should not hardcode command allowlist entry %q", shell, command)
+			}
 		}
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +15,18 @@ import (
 )
 
 var accountNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
+
+var reservedAccountNames = map[string]struct{}{
+	"add":        {},
+	"completion": {},
+	"help":       {},
+	"init":       {},
+	"list":       {},
+	"ls":         {},
+	"remove":     {},
+	"rm":         {},
+	"whoami":     {},
+}
 
 // Store manages docker-use accounts on disk.
 type Store struct {
@@ -28,15 +39,13 @@ type Account struct {
 	Path string
 }
 
+const currentAccountFile = ".current"
+
 // NewStore creates a Store, defaulting to ~/.docker-accounts or DOCKER_USE_DIR.
 func NewStore() (*Store, error) {
-	root := os.Getenv("DOCKER_USE_DIR")
-	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-		root = filepath.Join(home, ".docker-accounts")
+	root, err := storeRoot()
+	if err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, err
@@ -47,10 +56,34 @@ func NewStore() (*Store, error) {
 	return &Store{Root: root}, nil
 }
 
+// OpenStore creates a Store without creating or chmodding the root directory.
+func OpenStore() (*Store, error) {
+	root, err := storeRoot()
+	if err != nil {
+		return nil, err
+	}
+	return &Store{Root: root}, nil
+}
+
+func storeRoot() (string, error) {
+	root := os.Getenv("DOCKER_USE_DIR")
+	if root == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		root = filepath.Join(home, ".docker-accounts")
+	}
+	return root, nil
+}
+
 // validateName rejects path-unsafe account names.
 func validateName(name string) error {
 	if !accountNamePattern.MatchString(name) {
 		return fmt.Errorf("invalid account name: %q", name)
+	}
+	if _, ok := reservedAccountNames[name]; ok {
+		return fmt.Errorf("account name %q is reserved", name)
 	}
 	return nil
 }
@@ -128,11 +161,46 @@ func (s Store) Exists(name string) bool {
 
 // Export returns the account directory for shell wrappers.
 func (s Store) Export(name string) (string, error) {
+	if err := validateName(name); err != nil {
+		return "", err
+	}
 	p, err := s.existingAccountPath(name)
 	if err != nil {
 		return "", fmt.Errorf("account %q does not exist", name)
 	}
 	return p, nil
+}
+
+// SaveCurrent persists the account selected by the shell wrapper.
+func (s Store) SaveCurrent(name string) (string, error) {
+	p, err := s.Export(name)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(s.Root, currentAccountFile), []byte(name+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return p, nil
+}
+
+// Current returns the persisted account and path, or empty values when unset.
+func (s Store) Current() (string, string, error) {
+	data, err := os.ReadFile(filepath.Join(s.Root, currentAccountFile))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "", nil
+		}
+		return "", "", err
+	}
+	name := strings.TrimSpace(string(data))
+	if name == "" {
+		return "", "", nil
+	}
+	p, err := s.Export(name)
+	if err != nil {
+		return "", "", nil
+	}
+	return name, p, nil
 }
 
 // Remove deletes an account directory.
@@ -176,15 +244,11 @@ func (s Store) Add(ctx context.Context, name, username string, force bool) error
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	created := false
 	if err := os.MkdirAll(p, 0o700); err != nil {
 		return err
 	}
-	created = true
 	if err := os.Chmod(p, 0o700); err != nil {
-		if created {
-			_ = os.RemoveAll(p)
-		}
+		_ = os.RemoveAll(p)
 		return err
 	}
 
@@ -193,17 +257,13 @@ func (s Store) Add(ctx context.Context, name, username string, force bool) error
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		if created {
-			_ = os.RemoveAll(p)
-		}
+		_ = os.RemoveAll(p)
 		return fmt.Errorf("docker login failed: %w", err)
 	}
 
 	configPath := filepath.Join(p, "config.json")
 	if err := stripCredentialHelpers(configPath); err != nil {
-		if created {
-			_ = os.RemoveAll(p)
-		}
+		_ = os.RemoveAll(p)
 		return fmt.Errorf("failed to strip credsStore: %w", err)
 	}
 	return nil
@@ -264,7 +324,7 @@ func fsyncDir(dir string) error {
 		return err
 	}
 	defer f.Close()
-	if err := f.Sync(); err != nil && err != io.ErrUnexpectedEOF {
+	if err := f.Sync(); err != nil {
 		return err
 	}
 	return nil
@@ -297,7 +357,7 @@ func CurrentFromEnv(store *Store) (string, error) {
 		return "", nil
 	}
 	rel, err := filepath.Rel(root, config)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+	if err != nil {
 		return "", err
 	}
 	parts := strings.Split(rel, string(os.PathSeparator))

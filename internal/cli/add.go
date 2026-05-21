@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/chiragagg5k/docker-use/internal/accounts"
 	"github.com/spf13/cobra"
 )
@@ -15,9 +13,6 @@ func newAddCommand() *cobra.Command {
 		Short: "Add a new account",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if username == "" {
-				return fmt.Errorf("--username (-u) is required")
-			}
 			store, err := accounts.NewStore()
 			if err != nil {
 				return err

@@ -20,7 +20,7 @@ func tmpStore(t *testing.T) *Store {
 }
 
 func TestValidateName(t *testing.T) {
-	bad := []string{"", ".", "..", "foo/bar", "foo\\bar", "   ", "-x", "foo bar", "$x", "`x`", "semi;colon", strings.Repeat("a", 65)}
+	bad := []string{"", ".", "..", "foo/bar", "foo\\bar", "   ", "-x", "foo bar", "$x", "`x`", "semi;colon", "add", "list", "help", "init", strings.Repeat("a", 65)}
 	for _, name := range bad {
 		if validateName(name) == nil {
 			t.Errorf("expected error for %q", name)
@@ -60,6 +60,21 @@ func TestNewStorePermissions(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0o700 {
 		t.Fatalf("root mode = %o, want 700", got)
+	}
+}
+
+func TestOpenStoreDoesNotCreateRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "accounts")
+	t.Setenv("DOCKER_USE_DIR", root)
+	store, err := OpenStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.Root != root {
+		t.Fatalf("root = %q, want %q", store.Root, root)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("OpenStore should not create root, stat err: %v", err)
 	}
 }
 
@@ -299,6 +314,49 @@ func TestCurrentFromEnv(t *testing.T) {
 	}
 	if name != "" {
 		t.Fatalf("external name = %q, want empty", name)
+	}
+}
+
+func TestSaveAndLoadCurrent(t *testing.T) {
+	s := tmpStore(t)
+	accountPath := filepath.Join(s.Root, "foo")
+	if err := os.MkdirAll(accountPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path, err := s.SaveCurrent("foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != accountPath {
+		t.Fatalf("path = %q, want %q", path, accountPath)
+	}
+	name, currentPath, err := s.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "foo" || currentPath != accountPath {
+		t.Fatalf("current = %q, %q; want foo, %q", name, currentPath, accountPath)
+	}
+	info, err := os.Stat(filepath.Join(s.Root, currentAccountFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("current file mode = %o, want 600", got)
+	}
+}
+
+func TestCurrentIgnoresStaleAccount(t *testing.T) {
+	s := tmpStore(t)
+	if err := os.WriteFile(filepath.Join(s.Root, currentAccountFile), []byte("missing\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	name, path, err := s.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "" || path != "" {
+		t.Fatalf("current = %q, %q; want empty", name, path)
 	}
 }
 

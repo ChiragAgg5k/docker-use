@@ -23,6 +23,7 @@ func executeCommand(t *testing.T, args ...string) (string, string, error) {
 func TestBareAccountPrintsHumanMessage(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DOCKER_USE_DIR", root)
+	t.Setenv("SHELL", "/opt/homebrew/bin/fish")
 	accountPath := filepath.Join(root, "foo")
 	if err := os.MkdirAll(accountPath, 0o700); err != nil {
 		t.Fatal(err)
@@ -37,8 +38,31 @@ func TestBareAccountPrintsHumanMessage(t *testing.T) {
 	if !strings.Contains(out, "To switch this shell") {
 		t.Fatalf("output = %q, want shell wrapper instruction", out)
 	}
-	if !strings.Contains(out, " init zsh)") {
+	if !strings.Contains(out, " init fish)") {
 		t.Fatalf("output = %q, want init command instruction", out)
+	}
+}
+
+func TestNoArgsPrintsShortMessage(t *testing.T) {
+	out, _, err := executeCommand(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "No account selected") {
+		t.Fatalf("output = %q, want no-account message", out)
+	}
+	if strings.Contains(out, "Available Commands") {
+		t.Fatalf("output = %q, did not want full usage banner", out)
+	}
+}
+
+func TestVersionFlag(t *testing.T) {
+	out, _, err := executeCommand(t, "--version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "docker-use version") {
+		t.Fatalf("output = %q, want version output", out)
 	}
 }
 
@@ -58,10 +82,54 @@ func TestHiddenPathCommandPrintsOnlyPath(t *testing.T) {
 	}
 }
 
+func TestHiddenSwitchPersistsCurrentAccount(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DOCKER_USE_DIR", root)
+	accountPath := filepath.Join(root, "foo")
+	if err := os.MkdirAll(accountPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := executeCommand(t, "__switch", "foo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != accountPath {
+		t.Fatalf("switch output = %q, want path %q", out, accountPath)
+	}
+	out, _, err = executeCommand(t, "__current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != accountPath {
+		t.Fatalf("current output = %q, want path %q", out, accountPath)
+	}
+}
+
 func TestUseCommandIsRemoved(t *testing.T) {
 	_, _, err := executeCommand(t, "use", "foo")
-	if err == nil {
-		t.Fatal("expected use to be treated as an invalid account, not a subcommand")
+	if err == nil || !strings.Contains(err.Error(), "accepts at most 1 arg") {
+		t.Fatalf("expected root arg-count error for removed use command, got %v", err)
+	}
+}
+
+func TestReservedAccountNameIsNotSwitchable(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DOCKER_USE_DIR", root)
+	if err := os.MkdirAll(filepath.Join(root, "list"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := executeCommand(t, "__switch", "--", "list")
+	if err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("expected reserved account error, got %v", err)
+	}
+}
+
+func TestHiddenSwitchTreatsFlagsAsAccountNames(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DOCKER_USE_DIR", root)
+	_, _, err := executeCommand(t, "__switch", "--", "--version")
+	if err == nil || !strings.Contains(err.Error(), "invalid account name") {
+		t.Fatalf("expected invalid account error, got %v", err)
 	}
 }
 
